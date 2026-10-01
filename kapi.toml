@@ -1,0 +1,29 @@
+# goz'un altin-kapi beyanı. Değer: "uygulanir" ya da "uygulanmaz".
+# Anahtarlar altin-kapi CONTEXT.md'deki on altı boyuttur.
+#
+# goz bir çataldır (upstream: mustafaahci/goz). Kapı yalnız bu çatalın pre-push'unda
+# koşar; upstream'in CI'ına bir şey eklenmez.
+
+# Taban çizgilerindeki ad: klasör adı klonlayana göre değişir, bu değişmez.
+repo = "goz"
+
+[boyut]
+arkayuz = "uygulanir"                  # dizin servisi (daemon) + adlandırılmış boru
+onyuz = "uygulanmaz"                   # yalnız komut satırı
+veritabani = "uygulanmaz"              # kendi ikili dizini var, veritabanı yok
+makine_zararsizligi = "uygulanir"      # USN günlüğü okur, arka planda süreç tutar
+tedarik_guvenligi = "uygulanir"        # deny.toml
+bellek_guvenligi = "uygulanir"         # zerocopy, Win32 FFI
+kimlik_yolu = "uygulanmaz"             # kimlik doğrulama yok
+yayina_hazirlik = "uygulanir"          # release iş akışı
+kaynak_tuketimi = "uygulanir"          # bellekteki dizin boyutu
+birlikte_calisabilirlik = "uygulanir"  # \\.\pipe\goz-v1 protokolü
+karakter_yazimi = "uygulanir"
+hata_disiplini = "uygulanir"
+test_gercekciligi = "uygulanir"
+veri_dayanikliligi = "uygulanmaz"      # dizin yalnız bellekte; diske yalnız günlük yazılır
+surum_izi = "uygulanir"
+belge_dogrulugu = "uygulanir"
+
+[karakter.muaf]
+"crates/goz-core/src/fold.rs" = "Dosya adı katlaması: Unicode basit küçük harf (NTFS anlamı, aksan korunur); Türkçe I/İ/ı ayrıca i'ye iner, sınaması var"

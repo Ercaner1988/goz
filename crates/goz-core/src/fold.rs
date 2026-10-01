@@ -62,6 +62,9 @@ fn fold_non_ascii(bytes: &[u8], out: &mut Vec<u8>) {
     let mut run: SmallVec<[char; 256]> = SmallVec::new();
     for cp in CodePoints::new(bytes) {
         match char::from_u32(cp) {
+            // `İ` decomposes to `I` + U+0307; the dot would survive lowering and
+            // "İSTANBUL" would never match "istanbul".
+            Some('İ') => run.push('i'),
             Some(c) => decompose_canonical(c, |d| run.push(lower_char(d))),
             // Surrogate / non-scalar (WTF-8): it can take part in no
             // composition, so flush the run and pass it through unchanged.
@@ -76,9 +79,7 @@ fn fold_non_ascii(bytes: &[u8], out: &mut Vec<u8>) {
 
 /// Canonically composes `run` into `out` as WTF-8 and clears it.
 fn compose_into(run: &mut SmallVec<[char; 256]>, out: &mut Vec<u8>) {
-    if run.is_empty() {
-        return;
-    }
+    // An empty run composes to nothing; no early return needed.
     for c in run.iter().copied().nfc() {
         encode(c as u32, out);
     }
@@ -94,8 +95,13 @@ pub fn fold(bytes: &[u8]) -> Vec<u8> {
 /// Simple 1:1 lowercase of one scalar: the first scalar of the full lowercase
 /// mapping. 1:1 and stable, unlike full folding (ß→ss) which is not
 /// length-preserving and diverges from filesystem semantics.
+///
+/// Turkish dotless `ı` also folds to `i`: `I` already lowers to `i` and `İ` to
+/// `i` + U+0307 (first scalar `i`), so without this "IŞIK" never finds
+/// "ışık.txt". All four i-letters meet at `i`; accents are still kept.
+/// (`to_lowercase` always yields a scalar, so the fallback is only ever `ı`.)
 fn lower_char(c: char) -> char {
-    c.to_lowercase().next().unwrap_or(c)
+    c.to_lowercase().next().filter(|&l| l != 'ı').unwrap_or('i')
 }
 
 /// Encodes one code point as WTF-8 (surrogates permitted).
@@ -135,6 +141,19 @@ mod tests {
             let twice = fold(&once);
             assert_eq!(once, twice, "fold not idempotent for {s}");
         }
+    }
+
+    /// Turkish i-letters meet at `i` whichever case the name or the query uses.
+    #[test]
+    fn turkish_i_letters_fold_together() {
+        assert_eq!(fold("IŞIK".as_bytes()), fold("ışık".as_bytes()));
+        assert_eq!(fold("İSTANBUL".as_bytes()), fold(b"istanbul"));
+        assert_eq!(fold("ılık".as_bytes()), "ilik".as_bytes());
+        assert_ne!(
+            fold("çay".as_bytes()),
+            fold(b"cay"),
+            "accents are not folded"
+        );
     }
 
     #[test]
