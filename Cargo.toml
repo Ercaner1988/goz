@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/goz-core",
+    "crates/goz-bellek",
     "crates/goz-winfs",
     "crates/goz-daemon",
     "crates/goz-cli",

@@ -9,6 +9,7 @@ authors.workspace = true
 publish = false
 
 [dependencies]
+goz-bellek = { path = "../goz-bellek" }
 zerocopy.workspace = true
 memchr.workspace = true
 rustc-hash.workspace = true

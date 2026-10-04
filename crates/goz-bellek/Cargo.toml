@@ -1,0 +1,11 @@
+[package]
+name = "goz-bellek"
+description = "Allocation helpers for goz's column stores: real shrink under mimalloc, stepped growth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]

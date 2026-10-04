@@ -1114,9 +1114,9 @@ impl VolumeIndex {
         self.names.shrink_with_headroom();
         self.dir_children.shrink_to_fit();
         if let FrnMap::Dense(v) = &mut self.by_frn {
-            // Dense map growth is resize-to-record-number, not doubling, so
-            // exact fit is safe here.
-            v.shrink_to_fit();
+            // Live growth steps by `grow_step`, so headroom-fit like the rest
+            // (`shrink_to_fit` is a no-op under mimalloc, see `shrink_vec`).
+            goz_bellek::shrink_vec(v);
         }
     }
 

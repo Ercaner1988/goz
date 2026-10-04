@@ -14,6 +14,7 @@
 //! and an exact chain needs no per-candidate staleness guard at query time.
 
 use crate::types::{EntryIdx, Frn, NIL};
+use goz_bellek::{grow_step, shrink_vec};
 use rustc_hash::FxHashMap;
 
 /// Interned-name handle: an index into the name store's tables.
@@ -107,12 +108,6 @@ fn hash_bytes(b: &[u8]) -> u64 {
     let mut h = rustc_hash::FxHasher::default();
     b.hash(&mut h);
     h.finish()
-}
-
-/// Shrinks a Vec to its length plus ~1.6% headroom (see
-/// `NameStore::shrink_with_headroom` for why never to exact-fit).
-fn shrink_vec<T>(v: &mut Vec<T>) {
-    v.shrink_to(v.len() + v.len() / 64 + 64);
 }
 
 /// `NameStore::raw_bytes` over explicit tables: the intern table's rehash
@@ -557,6 +552,10 @@ impl EntryTable {
             idx
         } else {
             let idx = self.frn.len() as EntryIdx;
+            if self.frn.len() == self.frn.capacity() {
+                let n = grow_step(self.frn.len());
+                goz_bellek::each_column!(self, goz_bellek::reserve, n);
+            }
             self.frn.push(frn);
             self.parent.push(parent);
             self.name_id.push(name_id);
@@ -727,18 +726,7 @@ impl EntryTable {
     /// churn does not re-double every column (see
     /// `NameStore::shrink_with_headroom`). Called once post-bootstrap.
     pub(crate) fn shrink_with_headroom(&mut self) {
-        shrink_vec(&mut self.frn);
-        shrink_vec(&mut self.parent);
-        shrink_vec(&mut self.name_id);
-        shrink_vec(&mut self.flags);
-        shrink_vec(&mut self.size);
-        shrink_vec(&mut self.mtime);
-        shrink_vec(&mut self.next_link);
-        shrink_vec(&mut self.next_same);
-        shrink_vec(&mut self.prev_same);
-        shrink_vec(&mut self.first_child);
-        shrink_vec(&mut self.next_child);
-        shrink_vec(&mut self.prev_child);
+        goz_bellek::each_column!(self, shrink_vec);
         shrink_vec(&mut self.free);
     }
 }
@@ -786,6 +774,10 @@ impl FrnMap {
             FrnMap::Dense(v) => {
                 let r = record as usize;
                 if r >= v.len() {
+                    // `resize` grows amortized (doubling); step like the entry columns.
+                    if r >= v.capacity() {
+                        v.reserve_exact(r + 1 - v.len() + grow_step(v.len()));
+                    }
                     v.resize(r + 1, NIL);
                 }
                 v[r] = idx;
@@ -864,5 +856,23 @@ impl FrnMap {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod growth_tests {
+    use super::*;
+
+    #[test]
+    fn dense_frn_map_grows_in_steps_not_doubling() {
+        let mut m = FrnMap::dense(1_000_000);
+        m.set(1_000_000, 7);
+        let FrnMap::Dense(v) = &m else { unreachable!() };
+        assert!(
+            v.capacity() <= 1_000_001 + grow_step(1_000_000),
+            "{}",
+            v.capacity()
+        );
+        assert_eq!(m.get(1_000_000), Some(7));
     }
 }

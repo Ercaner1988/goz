@@ -372,8 +372,10 @@ fn extract_name(
         return Err(WalkError::MalformedName { offset });
     }
     let units: Vec<u16> = rec[name_off..span_end]
-        .chunks_exact(2)
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u16::from_le_bytes(*pair))
         .collect();
     let mut name = Vec::with_capacity(name_len);
     let name_lossy = wtf8::from_utf16(&units, &mut name);
