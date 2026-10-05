@@ -30,6 +30,17 @@ pub fn grow_step(len: usize) -> usize {
     (len / 16).max(1 << 16)
 }
 
+/// Bounded best-`k` collection: once `v` holds `2k` items, keeps only the `k`
+/// smallest under `cmp` (quickselect, order within them unspecified). Called
+/// after every push, it caps a scan's memory at `2k` items while the final `k`
+/// stays exactly the best `k` of everything pushed. `k == 0` is a no-op.
+pub fn keep_best<T>(v: &mut Vec<T>, k: usize, cmp: impl FnMut(&T, &T) -> std::cmp::Ordering) {
+    if k > 0 && v.len() >= 2 * k {
+        v.select_nth_unstable_by(k - 1, cmp);
+        v.truncate(k);
+    }
+}
+
 /// Reserves exactly `additional` more elements (used through [`each_column!`]).
 pub fn reserve<T>(v: &mut Vec<T>, additional: usize) {
     v.reserve_exact(additional);
@@ -71,6 +82,22 @@ mod tests {
             v.capacity()
         );
         assert_eq!((v.len(), v[599_999]), (600_000, 599_999));
+    }
+
+    #[test]
+    fn keep_best_bounds_memory_and_keeps_the_best() {
+        let mut v = Vec::new();
+        for x in (0..1000u32).rev() {
+            v.push((x * 7919) % 1000);
+            keep_best(&mut v, 5, |a, b| a.cmp(b));
+            assert!(v.len() < 10);
+        }
+        keep_best(&mut v, 5, |a, b| a.cmp(b)); // may still hold up to 2k-1
+        v.sort_unstable();
+        assert_eq!(&v[..5], [0, 1, 2, 3, 4]);
+        let mut w = vec![3, 1];
+        keep_best(&mut w, 0, |a: &i32, b| a.cmp(b));
+        assert_eq!(w, [3, 1], "k = 0 leaves the Vec alone");
     }
 
     #[test]
