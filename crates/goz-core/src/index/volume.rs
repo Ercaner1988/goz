@@ -472,6 +472,33 @@ impl VolumeIndex {
     /// Appends `dir\dir\name` (no volume/mount prefix) for `idx` into `out` as
     /// WTF-8, returning how the walk terminated.
     pub fn path_of(&self, idx: EntryIdx, out: &mut Vec<u8>) -> PathStatus {
+        let (chain, status) = self.walk(idx);
+        if status == PathStatus::CycleDetected {
+            return status;
+        }
+        // Emit from the top down, skipping the volume root (its name is empty
+        // and the mount prefix is added by the daemon).
+        for &e in chain.iter().rev() {
+            if e == self.root {
+                continue;
+            }
+            if !out.is_empty() {
+                out.push(b'\\');
+            }
+            out.extend_from_slice(self.names.raw_bytes(self.entries.name_id(e)));
+        }
+        status
+    }
+
+    /// What [`Self::path_of`] would return for `idx`, without building the path:
+    /// the query engine's presentability check needs only this, per directory.
+    pub fn path_status(&self, idx: EntryIdx) -> PathStatus {
+        self.walk(idx).1
+    }
+
+    /// The parent chain of `idx` (itself first) and how it terminates. The one
+    /// place the termination rules live, shared by `path_of` and `path_status`.
+    fn walk(&self, idx: EntryIdx) -> (SmallVec<[EntryIdx; 32]>, PathStatus) {
         let mut chain: SmallVec<[EntryIdx; 32]> = SmallVec::new();
         let mut cur = idx;
         for _ in 0..MAX_PATH_HOPS {
@@ -487,28 +514,14 @@ impl VolumeIndex {
         let top = *chain
             .last()
             .expect("path_of chain always contains the starting entry");
-        if self.entries.parent(top) != NIL {
-            return PathStatus::CycleDetected;
-        }
-        let in_lost_found = top == self.lost_found;
-
-        // Emit from the top down, skipping the volume root (its name is empty
-        // and the mount prefix is added by the daemon).
-        for &e in chain.iter().rev() {
-            if e == self.root {
-                continue;
-            }
-            if !out.is_empty() {
-                out.push(b'\\');
-            }
-            out.extend_from_slice(self.names.raw_bytes(self.entries.name_id(e)));
-        }
-
-        if in_lost_found {
+        let status = if self.entries.parent(top) != NIL {
+            PathStatus::CycleDetected
+        } else if top == self.lost_found {
             PathStatus::InLostFound
         } else {
             PathStatus::Ok
-        }
+        };
+        (chain, status)
     }
 
     /// The chain-head entry for `frn`, if present and not stale.

@@ -219,11 +219,8 @@ struct Scan<'q> {
     parsed: &'q ParsedQuery,
     compiled: CompiledQuery<'q>,
     scope_memo: FxHashMap<EntryIdx, bool>,
-    /// Each parent directory's reconstructed path, or None when it has none (its
-    /// ancestry ends in lost+found, or hit the hop cap). ONE memo, shared by the
-    /// candidate filter and the page builder: both need exactly this walk, and
-    /// doing it twice cost a rare query ~13% for nothing.
-    dir_paths: FxHashMap<EntryIdx, Option<Vec<u8>>>,
+    /// Per parent directory: does it have a presentable path (`path_status` Ok)?
+    dir_ok: FxHashMap<EntryIdx, bool>,
     /// Per-candidate scratch buffers, allocated once and reused across the scan
     /// so wildcard decoding and extension folding don't heap-allocate per hit.
     cp_buf: CodePointBuf,
@@ -285,7 +282,7 @@ fn run_query_impl(
         parsed,
         compiled: CompiledQuery::new(parsed),
         scope_memo: FxHashMap::default(),
-        dir_paths: FxHashMap::default(),
+        dir_ok: FxHashMap::default(),
         cp_buf: CodePointBuf::new(),
         ext_scratch: Vec::new(),
         candidates: Vec::new(),
@@ -372,7 +369,9 @@ fn run_query_impl(
         }
     }
 
-    let (total, mut candidates, mut dir_paths) = (scan.total, scan.candidates, scan.dir_paths);
+    let (total, mut candidates) = (scan.total, scan.candidates);
+    // Each page row's parent path, or None when it has none: siblings share it.
+    let mut dir_paths: FxHashMap<EntryIdx, Option<Vec<u8>>> = FxHashMap::default();
 
     let start = (offset as usize).min(candidates.len());
     let end = match limit {
@@ -502,7 +501,7 @@ impl Scan<'_> {
             parsed,
             compiled,
             scope_memo,
-            dir_paths,
+            dir_ok,
             cp_buf,
             ext_scratch,
             ..
@@ -557,15 +556,18 @@ impl Scan<'_> {
         // print nothing while reporting a non-zero total, and the same query without
         // `-n` prints the real hits.
         //
-        // Calls the very function the page loop uses rather than re-deriving its
-        // rules, so the two cannot drift, and memoizes per parent directory rather
-        // than per file. Gated on `has_orphans` because an index with no live
+        // Asks `path_status`, which shares `path_of`'s walk (so the two cannot
+        // drift) but builds no path, memoized per parent directory. Building the
+        // path here (`path_of` + a Vec per directory) doubled a broad query once
+        // the index held a single orphan, and a real volume always holds some
+        // (2026-10-05: 109 928 placeholders; synthetic 2.1M: 367 → 805 ms). Gated on `has_orphans` because an index with no live
         // placeholder cannot contain an unpresentable entry: `has_orphans` is a
         // single load, while the walk it guards is one `path_of` per distinct parent
         // directory, which on a broad limited query is tens of thousands of walks
         // the page (100 rows) would never have needed. Paying it unconditionally
         // cost a broad limited query ~20%.
-        if index.has_orphans() && parent_path(index, entry.parent(), dir_paths).is_none() {
+        let ok = |p| index.path_status(p) == crate::index::PathStatus::Ok;
+        if index.has_orphans() && !*dir_ok.entry(entry.parent()).or_insert_with_key(|&p| ok(p)) {
             return None;
         }
 
@@ -635,27 +637,6 @@ fn ext_matches(filters: &Filters, name: &[u8], scratch: &mut Vec<u8>) -> bool {
 
 fn fold(bytes: &[u8]) -> Vec<u8> {
     crate::fold::fold(bytes)
-}
-
-/// The reconstructed path of `parent`, or `None` when it has none. Memoized per
-/// directory and shared with the page builder.
-///
-/// Returns the path rather than a bool so ONE walk serves both callers: the
-/// candidate filter needs to know whether a hit is presentable at all (so
-/// `total` counts only what the page can return), and the page builder needs the
-/// path itself. Computing them separately walked every parent chain twice.
-fn parent_path<'a>(
-    index: &VolumeIndex,
-    parent: EntryIdx,
-    memo: &'a mut FxHashMap<EntryIdx, Option<Vec<u8>>>,
-) -> &'a Option<Vec<u8>> {
-    memo.entry(parent).or_insert_with(|| {
-        let mut buf = Vec::new();
-        match index.path_of(parent, &mut buf) {
-            crate::index::PathStatus::Ok => Some(buf),
-            _ => None, // parent under lost+found or a cycle: not presentable
-        }
-    })
 }
 
 /// Is `node` a descendant of `root`? Memoized parent walk.
