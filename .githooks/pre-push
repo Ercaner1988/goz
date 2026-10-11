@@ -81,7 +81,8 @@ command -v kapi >/dev/null 2>&1 || {
 
 echo "pre-push: altin kapi kosuyor (ag yok)…" >&2
 basla=$(date +%s)
-kapi . >&2
+# --guvenilen-kod: kendi depomuz; kapi cargo denetimlerini kosar (altin-kapi ADR 0010).
+kapi . --guvenilen-kod >&2
 sonuc=$?
 
 echo "pre-push: kapi $(( $(date +%s) - basla )) sn surdu." >&2
